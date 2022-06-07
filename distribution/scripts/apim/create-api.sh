@@ -452,16 +452,6 @@ api_create_request() {
 EOF
 }
 
-# mediation_policy_request() {
-#     cat <<EOF
-# {
-#     "name": "mediation-api-sequence",
-#     "type": "out",
-#     "config": "$1"
-# }
-# EOF
-# }
-
 subscription_request() {
     cat <<EOF
 { 
@@ -477,7 +467,7 @@ create_api() {
     local api_desc="$2"
     echo "Creating $api_name API..."
     # Check whether API exists
-    local existing_api_id=$($curl_command -H "Authorization: Bearer $view_access_token" ${base_https_url}/api/am/publisher/v2/apis?query=name:$api_name\$ | jq -r '.list[0] | .id')
+    local existing_api_id=$($curl_command -H "Authorization: Bearer $view_access_token" ${base_https_url}/api/am/publisher/v3/apis?query=name:$api_name\$ | jq -r '.list[0] | .id')
     if [ ! -z $existing_api_id ] && [ ! $existing_api_id = "null" ]; then
         echo "$api_name API already exists with ID $existing_api_id"
         echo -ne "\n"
@@ -501,7 +491,7 @@ create_api() {
                 echo -ne "\n"
             fi
 
-            local delete_api_status=$($curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $create_access_token" -X DELETE "${base_https_url}/api/am/publisher/v2/apis/$existing_api_id")
+            local delete_api_status=$($curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $create_access_token" -X DELETE "${base_https_url}/api/am/publisher/v3/apis/$existing_api_id")
             if [ $delete_api_status -eq 200 ]; then
                 echo "$api_name API deleted!"
                 echo -ne "\n"
@@ -514,7 +504,7 @@ create_api() {
             return
         fi
     fi
-    local api_id=$($curl_command -H "Authorization: Bearer $create_access_token" -F file=@$script_dir/schema/starwars-schema.graphql -d "$(api_create_request $api_name $api_desc)" ${base_https_url}/api/am/publisher/v2/apis | jq -r '.id')
+    local api_id=$($curl_command -H "Authorization: Bearer $create_access_token" -F file=@$script_dir/schema/starwars-schema.graphql -F additionalProperties="$(api_create_request $api_name $api_desc)" ${base_https_url}/api/am/publisher/v3/apis/import-graphql-schema | jq -r '.id')
     if [ ! -z $api_id ] && [ ! $api_id = "null" ]; then
         echo "Created $api_name API with ID $api_id"
         echo -ne "\n"
@@ -524,11 +514,11 @@ create_api() {
         return
     fi
 
-    local rev_id=$($curl_command -H "Authorization: Bearer $create_access_token" -H "Content-Type: application/json" -X POST -d '{"description": "first revision"}' ${base_https_url}/api/am/publisher/v2/apis/${api_id}/revisions | jq -r '.id')
-    local revisionUuid=$($curl_command -H "Authorization: Bearer $create_access_token" -H "Content-Type: application/json" -X POST -d '[{"name": "Default", "vhost": "localhost" ,"displayOnDevportal": true}]' ${base_https_url}/api/am/publisher/v2/apis/${api_id}/deploy-revision?revisionId=${rev_id} | jq -r '.[0] | .revisionUuid')
+    local rev_id=$($curl_command -H "Authorization: Bearer $create_access_token" -H "Content-Type: application/json" -X POST -d '{"description": "first revision"}' ${base_https_url}/api/am/publisher/v3/apis/${api_id}/revisions | jq -r '.id')
+    local revisionUuid=$($curl_command -H "Authorization: Bearer $create_access_token" -H "Content-Type: application/json" -X POST -d '[{"name": "Default", "vhost": "localhost" ,"displayOnDevportal": true}]' ${base_https_url}/api/am/publisher/v3/apis/${api_id}/deploy-revision?revisionId=${rev_id} | jq -r '.[0] | .revisionUuid')
 
     echo "Publishing $api_name API"
-    local publish_api_status=$($curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $publish_access_token" -X POST "${base_https_url}/api/am/publisher/v2/apis/change-lifecycle?action=Publish&apiId=${api_id}")
+    local publish_api_status=$($curl_command -w "%{http_code}" -o /dev/null -H "Authorization: Bearer $publish_access_token" -X POST "${base_https_url}/api/am/publisher/v3/apis/change-lifecycle?action=Publish&apiId=${api_id}")
     if [ $publish_api_status -eq 200 ]; then
         echo "$api_name API Published!"
         echo -ne "\n"
@@ -537,51 +527,6 @@ create_api() {
         echo -ne "\n"
         return
     fi
-    # if [ ! -z "$out_sequence" ]; then
-    #     echo "Adding mediation policy to $api_name API"
-    #     local sequence_id=$($curl_command -H "Authorization: Bearer $admin_token" -F policySpecFile='{"category":"Mediation","name":"mediation-api-sequence","displayName":"mediation-api-sequence","description":"","multipleAllowed":false,"applicableFlows":["response"],"supportedGateways":["Synapse"],"supportedApiTypes":["REST"],"policyAttributes":[]}' -F synapsePolicyDefinitionFile=@$script_dir/payload/perf-mediation.j2 "${base_https_url}/api/am/publisher/v2/operation-policies" | jq -r '.id')
-    #     if [ ! -z $sequence_id ] && [ ! $sequence_id = "null" ]; then
-    #         echo "Mediation policy added with ID $sequence_id"
-    #         echo -ne "\n"
-    #     else
-    #         echo "Failed to add mediation policy"
-    #         echo -ne "\n"
-    #         return
-    #     fi
-    #     echo "Updating $api_name API to set mediation policy..."
-    #     local api_details=""
-    #     n=0
-    #     until [ $n -ge 50 ]; do
-    #         sleep 10
-    #         #Get API
-    #         api_details="$($curl_command -H "Authorization: Bearer $view_access_token" "${base_https_url}/api/am/publisher/v2/apis/${api_id}" || echo "")"
-    #         if [ -n "$api_details" ]; then
-    #             # Update API with sequence
-    #             echo "Updating $api_name API to set mediation policy..."
-    #             api_details=$(echo "$api_details" | jq -r '.operations[0].operationPolicies |= {"request":[],"response":[{"policyName":"mediation-api-sequence","policyId":"'$sequence_id'","order":1,"parameters":{}}],"fault":[]}')
-    #             break
-    #         fi
-    #         n=$(($n + 1))
-    #     done
-    #     n=0
-    #     until [ $n -ge 50 ]; do
-    #         sleep 10
-    #         local updated_api="$($curl_command -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -X PUT -d "$api_details" "${base_https_url}/api/am/publisher/v2/apis/${api_id}")"
-    #         local updated_api_id=$(echo "$updated_api" | jq -r '.id')
-    #         if [ ! -z $updated_api_id ] && [ ! $updated_api_id = "null" ]; then
-    #             echo "Mediation policy is set to $api_name API with ID $updated_api_id"
-    #             local rev_id_2=$($curl_command -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -X POST -d '{"description": "first revision"}' ${base_https_url}/api/am/publisher/v2/apis/${updated_api_id}/revisions | jq -r '.id')
-    #             local revisionUuid=$($curl_command -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" -X POST -d '[{"name": "Default", "vhost": "localhost" ,"displayOnDevportal": true}]' ${base_https_url}/api/am/publisher/v2/apis/${updated_api_id}/deploy-revision?revisionId=${rev_id_2} | jq -r '.[0] | .revisionUuid')
-    #             sleep 3
-    #             break
-    #         fi
-    #         n=$(($n + 1))
-    #     done
-    #     if [ -z $updated_api_id ] || [ $updated_api_id = "null" ]; then
-    #         echo "Failed to set mediation policy to $api_name API"
-    #         return 1
-    #     fi
-    # fi
     echo "Subscribing $api_name API to PerformanceTestAPP"
     local subscription_id=$($curl_command -H "Authorization: Bearer $sub_manage_token" -H "Content-Type: application/json" -d "$(subscription_request $api_id)" "${base_https_url}/api/am/devportal/v2/subscriptions" | jq -r '.subscriptionId')
     if [ ! -z $subscription_id ] && [ ! $subscription_id = "null" ]; then
